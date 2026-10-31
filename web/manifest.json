@@ -1,6 +1,6 @@
 {
-    "name": "gramas_y_suministros_movil",
-    "short_name": "gramas_y_suministros_movil",
+    "name": "ParkLink",
+    "short_name": "ParkLink",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
