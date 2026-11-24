@@ -6,9 +6,8 @@
 #   VERCEL_ORG_ID     -> .vercel/project.json después de `vercel link`
 #   VERCEL_PROJECT_ID -> .vercel/project.json después de `vercel link`
 #
-# API_BASE_URL NO va en GitHub: se configura en Vercel por entorno.
-#   Preview    -> http://3.138.221.70:8000
-#   Production -> http://3.138.221.70:8001
+# La app web llama a su mismo origen (/api/...); vercel.json reenvía al
+# back-end de EC2. No se necesita API_BASE_URL en Vercel para web.
 # ---------------------------------------------------------------------------
 name: Deploy a Vercel
 
@@ -73,32 +72,13 @@ jobs:
       - name: Instalar Vercel CLI
         run: npm install --global vercel@latest
 
-      - name: Descargar configuración y variables del proyecto
+      - name: Descargar configuración del proyecto
         run: |
           if [ "$TARGET" = "production" ]; then
             vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
           else
             vercel pull --yes --environment=preview --token="$VERCEL_TOKEN"
           fi
-
-      - name: Validar API_BASE_URL
-        run: |
-          ENV_FILE=".vercel/.env.${TARGET}.local"
-          if [ -f "$ENV_FILE" ]; then
-            # Carga las variables del entorno (API_BASE_URL, etc.) para el build.
-            set -a
-            # shellcheck disable=SC1090
-            . "$ENV_FILE"
-            set +a
-          fi
-
-          if [ -z "${API_BASE_URL:-}" ]; then
-            echo "::error::Define API_BASE_URL en Vercel (Settings > Environment Variables) para el entorno ${TARGET}."
-            exit 1
-          fi
-
-          echo "Desplegando a ${TARGET} con API_BASE_URL=${API_BASE_URL}"
-          echo "API_BASE_URL=${API_BASE_URL}" >> "$GITHUB_ENV"
 
       - name: Build con Vercel
         run: |

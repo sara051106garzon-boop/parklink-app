@@ -2,19 +2,22 @@ import 'package:flutter/foundation.dart';
 
 /// Configuración central de la API de ParkLink.
 ///
-/// La URL del back-end se inyecta en tiempo de compilación con:
+/// Resolución de la URL base (siempre **sin** barra final):
 ///
-/// ```bash
-/// flutter build web --release \
-///   --dart-define=API_BASE_URL=http://3.138.221.70:8001
-/// ```
+/// 1. Si se define `API_BASE_URL` en tiempo de compilación
+///    (`--dart-define=API_BASE_URL=...`), se usa ese valor como override.
+/// 2. En **web** (producción/preview en Vercel) se usa [Uri.base.origin], es
+///    decir, el mismo origen HTTPS desde el que se cargó la app
+///    (`https://parklink-app.vercel.app`). Vercel reenvía `/api/*` al back-end
+///    de EC2 mediante `vercel.json`; así se eliminan el Mixed Content y el CORS
+///    (la app nunca llama directo a `http://3.138.221.70:8001` desde el
+///    navegador).
+/// 3. En emulador Android, `http://10.0.2.2:5000`.
+/// 4. En escritorio local, `http://127.0.0.1:5000`.
 ///
-/// En Vercel la variable `API_BASE_URL` se configura por entorno
-/// (Preview = staging 8000, Production = 8001) y el workflow la pasa al build.
-///
-/// Si no se define `API_BASE_URL`, se usan valores seguros para desarrollo
-/// local: `127.0.0.1:5000` en web/escritorio y `10.0.2.2:5000` en el emulador
-/// Android.
+/// Los endpoints finales quedan como `https://parklink-app.vercel.app/api/...`
+/// y **nunca** como `/api/api/...`: `uri('/api/auth/login')` antepone la base
+/// sin agregar un segundo `/api`.
 class ApiConfig {
   ApiConfig._();
 
@@ -29,6 +32,14 @@ class ApiConfig {
     final configured = _configuredBaseUrl.trim();
     if (configured.isNotEmpty) {
       return _normalize(configured);
+    }
+
+    // En web, las peticiones van al mismo origen; Vercel hace el proxy a EC2.
+    if (kIsWeb) {
+      final origin = _normalize(Uri.base.origin);
+      if (origin.isNotEmpty) {
+        return origin;
+      }
     }
 
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {

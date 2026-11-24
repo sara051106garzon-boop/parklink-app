@@ -2,51 +2,55 @@
 # ---------------------------------------------------------------------------
 # Build de Flutter Web para Vercel (o para CI).
 #
-# Uso local:
-#   API_BASE_URL=http://3.138.221.70:8000 bash scripts/vercel-build.sh
+# Con el proxy inverso de Vercel (vercel.json), el frontend web llama a su
+# MISMO origen (/api/...) y Vercel reenvía al back-end de EC2. Por eso, en los
+# builds de Vercel NO se define API_BASE_URL: ApiConfig usa Uri.base.origin.
 #
-# En Vercel, API_BASE_URL se toma de las Environment Variables del proyecto
-# (Preview = staging, Production = producciÃ³n). Si no estÃ¡ definida en un
-# build de Vercel, el script falla para evitar publicar una app apuntando a
-# localhost.
+# API_BASE_URL (--dart-define) queda como override OPCIONAL, por ejemplo para
+# builds móviles/desktop o desarrollo local directo:
+#   API_BASE_URL=http://3.138.221.70:8001 bash scripts/vercel-build.sh
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
 FLUTTER_VERSION="${FLUTTER_VERSION:-3.50.1}"
 FLUTTER_HOME="${FLUTTER_HOME:-$HOME/flutter}"
 
-if [ -z "${API_BASE_URL:-}" ]; then
-  if [ "${VERCEL:-0}" = "1" ]; then
-    echo "ERROR: API_BASE_URL no estÃ¡ configurada en Vercel." >&2
-    echo "ConfigÃºrala en Settings > Environment Variables para Preview y Production." >&2
-    exit 1
+BUILD_ARGS=()
+
+if [ -n "${API_BASE_URL:-}" ]; then
+  # Limpieza defensiva: quita comillas, saltos de línea y espacios sobrantes.
+  API_BASE_URL="$(printf '%s' "$API_BASE_URL" | tr -d '\r\n' \
+    | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' \
+          -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//")"
+
+  # Quita barras finales para evitar URLs del tipo http://host:8000//api/...
+  while [ "${API_BASE_URL%/}" != "$API_BASE_URL" ]; do
+    API_BASE_URL="${API_BASE_URL%/}"
+  done
+
+  case "$API_BASE_URL" in
+    http://*|https://*) ;;
+    *)
+      echo "ERROR: API_BASE_URL debe empezar por http:// o https:// (valor: $API_BASE_URL)" >&2
+      exit 1
+      ;;
+  esac
+
+  if [ "${API_BASE_URL#http://}" != "$API_BASE_URL" ] && [ "${VERCEL:-0}" = "1" ]; then
+    echo "ADVERTENCIA: se inyecta API_BASE_URL con HTTP en un build de Vercel." >&2
+    echo "El proxy de Vercel solo actúa cuando la app llama a su mismo origen." >&2
   fi
-  API_BASE_URL="http://127.0.0.1:5000"
-fi
 
-# Quita barras finales para evitar URLs del tipo http://host:8000//api/auth/login
-while [ "${API_BASE_URL%/}" != "$API_BASE_URL" ]; do
-  API_BASE_URL="${API_BASE_URL%/}"
-done
-
-API_BASE_URL="$(printf '%s' "$API_BASE_URL" | tr -d '\r\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//")"
-case "$API_BASE_URL" in
-  http://*|https://*) ;;
-  *)
-    echo "ERROR: API_BASE_URL debe empezar por http:// o https:// (valor: $API_BASE_URL)" >&2
-    exit 1
-    ;;
-esac
-
-if [ "${API_BASE_URL#http://}" != "$API_BASE_URL" ] && [ "${VERCEL:-0}" = "1" ]; then
-  echo "ADVERTENCIA: el frontend se sirve por HTTPS y API_BASE_URL usa HTTP." >&2
-  echo "Los navegadores bloquearÃ¡n las llamadas por contenido mixto. Usa HTTPS en el back-end." >&2
+  BUILD_ARGS=(--dart-define=API_BASE_URL="$API_BASE_URL")
+  echo "Build con API_BASE_URL=$API_BASE_URL (override explícito)."
+else
+  echo "API_BASE_URL no definida: en web se usará Uri.base.origin (proxy de Vercel)."
 fi
 
 export PATH="$FLUTTER_HOME/bin:$PATH"
 
 if ! command -v flutter >/dev/null 2>&1; then
-  echo "Flutter no estÃ¡ instalado. Descargando Flutter $FLUTTER_VERSION en $FLUTTER_HOME..."
+  echo "Flutter no está instalado. Descargando Flutter $FLUTTER_VERSION en $FLUTTER_HOME..."
   rm -rf "$FLUTTER_HOME"
   git clone --depth 1 --branch "$FLUTTER_VERSION" \
     https://github.com/flutter/flutter.git "$FLUTTER_HOME"
@@ -57,6 +61,6 @@ flutter --version
 flutter config --enable-web >/dev/null 2>&1 || true
 flutter --disable-analytics >/dev/null 2>&1 || true
 flutter pub get
-flutter build web --release --dart-define=API_BASE_URL="$API_BASE_URL"
+flutter build web --release "${BUILD_ARGS[@]}"
 
-echo "Build listo en build/web (API_BASE_URL=$API_BASE_URL)"
+echo "Build listo en build/web"

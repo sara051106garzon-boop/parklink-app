@@ -64,31 +64,27 @@ flutter run -d windows
 
 ## Configuración del back-end (`API_BASE_URL`)
 
-La URL base de la API se lee en tiempo de compilación desde la variable
-`API_BASE_URL` (ver `lib/config/api_config.dart`). No hay URLs hardcodeadas en
-los servicios:
+La URL base de la API se resuelve en `lib/config/api_config.dart` así:
+
+1. Si se define `API_BASE_URL` (`--dart-define`), se usa como **override**.
+2. En **web**, se usa `Uri.base.origin` (el mismo origen HTTPS donde corre la
+   app). Vercel reenvía `/api/*` al back-end de EC2 mediante `vercel.json`, así
+   que **no hay Mixed Content ni CORS**.
+3. Sin variable y fuera de web: `http://10.0.2.2:5000` (emulador Android) o
+   `http://127.0.0.1:5000` (escritorio local).
 
 ```bash
-# Desarrollo local (valor por defecto si no se define la variable)
+# Web (producción/preview): sin variable; la app llama a su mismo origen
+flutter build web --release
+
+# Override explícito para móvil/escritorio o desarrollo local directo
 flutter run --dart-define=API_BASE_URL=http://127.0.0.1:5000
-
-# Emulador Android
-flutter run --dart-define=API_BASE_URL=http://10.0.2.2:5000
-
-# Back-end de staging en EC2
-flutter build web --release --dart-define=API_BASE_URL=http://3.138.221.70:8000
-
-# Back-end de producción en EC2
 flutter build web --release --dart-define=API_BASE_URL=http://3.138.221.70:8001
 ```
 
-Sin `--dart-define`, la app usa `http://127.0.0.1:5000` (web/escritorio) o
-`http://10.0.2.2:5000` (emulador Android). `.env.example` documenta los valores;
-Flutter **no** carga archivos `.env` automáticamente.
-
-> El frontend en Vercel se sirve por HTTPS. Un back-end `http://` provoca
-> bloqueo por contenido mixto en el navegador. Lee la sección de HTTPS en
-> [`DEPLOY.md`](DEPLOY.md) antes de publicar.
+Los endpoints finales quedan como `https://parklink-app.vercel.app/api/...`
+(nunca `/api/api/...`). Flutter **no** carga archivos `.env` automáticamente;
+`.env.example` es solo una referencia.
 
 ## Despliegue en Vercel
 

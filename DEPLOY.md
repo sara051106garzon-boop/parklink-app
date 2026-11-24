@@ -3,42 +3,51 @@
 Este repositorio es una app **Flutter** (móvil y web), no un proyecto Vite/React.
 El despliegue en Vercel publica la compilación de **Flutter Web** (`build/web`).
 
-## 1. Piezas del despliegue
+## 1. Cómo se conecta al back-end (proxy inverso)
+
+Para eliminar el **Mixed Content** (HTTPS → HTTP) y el **CORS**, la app web **no**
+llama directo a `http://3.138.221.70:8001`. En su lugar:
+
+1. `lib/config/api_config.dart` resuelve la URL base a `Uri.base.origin` cuando
+   `kIsWeb` es verdadero, es decir `https://parklink-app.vercel.app`.
+2. La app llama a su mismo origen: `https://parklink-app.vercel.app/api/auth/login`.
+3. `vercel.json` reenvía `/api/:path*` al back-end de EC2, servidor a servidor:
+
+   ```json
+   { "source": "/api/:path*", "destination": "http://3.138.221.70:8001/api/:path*" }
+   ```
+
+   El navegador solo ve HTTPS con su propio origen (sin Mixed Content) y el
+   back-end recibe la petición desde Vercel sin cabecera `Origin` (sin CORS).
 
 | Archivo | Para qué sirve |
 | :--- | :--- |
-| `lib/config/api_config.dart` | Lee `API_BASE_URL` con `String.fromEnvironment` y centraliza las URLs de la API. |
-| `vercel.json` | Build, salida `build/web`, rewrites de SPA, cabeceras y bloqueo del build automático de Git. |
-| `scripts/vercel-build.sh` | Instala Flutter si no existe (build nativo de Vercel) y ejecuta `flutter build web --release --dart-define=API_BASE_URL=...`. |
-| `.github/workflows/deploy-vercel.yml` | CI/CD con GitHub Actions: `main` → Production, Pull Request → Preview, ejecución manual → entorno elegido. |
+| `lib/config/api_config.dart` | Resuelve la URL base: override `API_BASE_URL`, o `Uri.base.origin` en web. |
+| `vercel.json` | Build, salida `build/web`, **rewrite `/api/*` → EC2**, rewrite de SPA y cabeceras. |
+| `scripts/vercel-build.sh` | Instala Flutter (si no existe) y compila `build/web`. |
+| `.github/workflows/deploy-vercel.yml` | CI/CD: `main` → Production, Pull Request → Preview, manual → entorno elegido. |
 | `.env.example` | Referencia de valores. **Flutter no lee `.env` automáticamente.** |
-
-La variable `API_BASE_URL` debe ser la raíz del back-end, **sin** `/api` al final.
-`AuthService` agrega `/api/auth/login`.
 
 ## 2. Variables de entorno en Vercel
 
-Configúralas en **Vercel → Project → Settings → Environment Variables**:
+**Para web no se necesita ninguna variable.** La app usa `Uri.base.origin` y el
+rewrite se encarga del resto.
 
-| Entorno de Vercel | Cuándo se usa | `API_BASE_URL` |
-| :--- | :--- | :--- |
-| **Production** | Push a `main` / deploy de producción | `http://3.138.221.70:8001` |
-| **Preview** | Pull Requests y ramas de prueba (staging) | `http://3.138.221.70:8000` |
-| **Development** (opcional) | Solo para pruebas locales con `vercel dev` | `http://127.0.0.1:5000` |
-
-No marques `API_BASE_URL` como secreta: es una URL pública. No la escribas en el
-repositorio.
-
-También puedes crearlas desde la CLI (te pedirá el valor, no queda en Git):
+`API_BASE_URL` queda como **override opcional** (solo para builds móviles/desktop
+o pruebas locales directas):
 
 ```bash
-npx vercel env add API_BASE_URL production
-npx vercel env add API_BASE_URL preview
+flutter run --dart-define=API_BASE_URL=http://127.0.0.1:5000
+flutter build web --release --dart-define=API_BASE_URL=http://3.138.221.70:8001
 ```
 
-> **Importante:** `API_BASE_URL` debe existir en el entorno correcto. Si falta en
-> un build de Vercel, `scripts/vercel-build.sh` falla a propósito para no publicar
-> una app apuntando a `localhost`.
+> ⚠️ **Limitación del rewrite estático:** el `destination` de `vercel.json` es un
+> string fijo y apunta al back-end de **producción (`8001`)**. Por tanto, los
+> **Preview Deployments** también reenviarán a `8001` (no a staging `8000`). Si
+> necesitas que preview apunte a `8000`, usa una **Edge/Middleware de Vercel**
+> que lea una variable de entorno por entorno, o crea dos proyectos de Vercel
+> (uno por entorno) con distinto `vercel.json`. Ver la nota al final de la
+> sección 4.
 
 ## 3. Conectar Vercel con GitHub (opción recomendada: GitHub Actions)
 
@@ -85,15 +94,13 @@ npx vercel env add API_BASE_URL preview
 6. El workflow queda así:
 
    - Push a `main` → deploy a **Production**.
-   - Pull Request hacia `main` → deploy de **Preview** (staging).
+   - Pull Request hacia `main` → deploy de **Preview**.
    - **Run workflow** manual → eliges `preview` o `production`.
 
    Los secretos nunca se imprimen en logs. Si un PR viene de un fork, el job se
    omite porque GitHub no entrega secretos a forks.
 
 ### Opción alternativa: build nativo de Vercel (sin GitHub Actions)
-
-Si prefieres que Vercel compile en cada push:
 
 1. Elimina el bloque `"git": { "deploymentEnabled": false }` de `vercel.json`
    (o cámbialo a `true`).
@@ -102,125 +109,80 @@ Si prefieres que Vercel compile en cada push:
    descarga automáticamente. El build tarda más la primera vez.
 4. No actives también el workflow, para no desplegar dos veces.
 
-## 4. CORS en el back-end (EC2, puertos 8000 y 8001)
+## 4. CORS y acceso desde EC2
 
-El back-end Flask usa `Flask-CORS` y `Flask-SocketIO` con los orígenes de la
-variable `CORS_ORIGINS` (`app/config/settings.py`). Por defecto solo permite
-`http://localhost:5173` y `http://127.0.0.1:5173`, por lo que **el dominio de
-Vercel debe agregarse en cada entorno de EC2**:
+Con el proxy inverso, el navegador hace **misma-origen**, así que **no hay CORS
+ni preflight** para la web. El back-end recibe la petición desde Vercel sin
+cabecera `Origin`, por lo que no es necesario tocar `CORS_ORIGINS`.
 
-```env
-# .env del back-end de STAGING (EC2, puerto 8000)
-CORS_ORIGINS=https://parklink-app.vercel.app,https://parklink-app-git-main-TU-EQUIPO.vercel.app,https://parklink-app-git-staging-TU-EQUIPO.vercel.app
+Qué sí debes garantizar en EC2:
 
-# .env del back-end de PRODUCCIÓN (EC2, puerto 8001)
-CORS_ORIGINS=https://parklink-app.vercel.app,https://parklink-app-git-main-TU-EQUIPO.vercel.app
-```
+- El **Security Group** de EC2 debe permitir el puerto `8001` (y `8000` si lo
+  usas) desde Internet, ya que Vercel reenvía desde sus servidores (Vercel no
+  tiene IPs de salida fijas).
+- Si más adelante algún cliente llama directo al back-end (p. ej. desarrollo
+  local con `flutter run -d chrome` + `--dart-define=API_BASE_URL=...`), entonces
+  sí necesitas agregar ese origen a `CORS_ORIGINS` en el `.env` del servidor:
 
-- Usa los dominios reales que muestre Vercel (Project → Domains).
-- No uses `*`: el backend configura `supports_credentials=True` y los
-  navegadores rechazan `Access-Control-Allow-Origin: *` con credenciales.
-- Los **Preview Deployments** reciben una URL distinta en cada PR
-  (`parklink-app-<hash>-<equipo>.vercel.app`). Para que funcionen contra staging,
-  asigna un dominio/alias estable de preview en Vercel y agrégalo a `CORS_ORIGINS`,
-  o agrega temporalmente la URL del preview que estés probando.
-- `CORS_ORIGINS` también se usa para WebSockets, así que deben ser orígenes
-  exactos.
-- Después de editar el `.env` del servidor, recrea el contenedor para que tome
-  la variable:
+  ```env
+  # .env del back-end en EC2 (ejemplo)
+  CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173,https://parklink-app.vercel.app
+  ```
+
+  Después de editarlo, recrea el contenedor:
 
   ```bash
   docker compose up -d --force-recreate web
   ```
 
-- Verifica el preflight desde tu máquina:
+### Nota: proxy por entorno (staging 8000 vs producción 8001)
 
-  ```bash
-  curl -i -X OPTIONS "http://3.138.221.70:8000/api/auth/login" \
-    -H "Origin: https://TU-DOMINIO.vercel.app" \
-    -H "Access-Control-Request-Method: POST" \
-    -H "Access-Control-Request-Headers: content-type"
-  ```
+Si necesitas que **Preview → 8000** y **Production → 8001**, el rewrite estático
+no alcanza. Opciones:
 
-  Debe responder `200`/`204` con
-  `Access-Control-Allow-Origin: https://TU-DOMINIO.vercel.app`.
+- **Edge/Middleware** que lea `BACKEND_URL` por entorno y haga el proxy
+  (`middleware.ts` con `NextResponse.rewrite` no aplica aquí porque no hay Next;
+  usar una **Edge Function** `/api/[...path].ts` que reenvíe a
+  `process.env.BACKEND_URL`).
+- **Dos proyectos de Vercel** (uno por entorno) con `vercel.json` distinto.
+- **HTTPS en el back-end** con dominios por entorno (`api-staging`, `api`) y
+  `API_BASE_URL` por entorno.
 
-- El Security Group de EC2 debe permitir los puertos `8000` y `8001` (idealmente
-  solo desde las IPs necesarias; Vercel no tiene IPs fijas de salida).
-
-> Si al abrir un Preview Deployment Vercel pide iniciar sesión, revisa
-> **Settings → Deployment Protection** y desactiva la protección para previews
-> (o usa un dominio de preview accesible) antes de probar el CORS.
-
-## 5. HTTPS y contenido mixto (crítico)
-
-Vercel publica el frontend por **HTTPS**. Si `API_BASE_URL` apunta a
-`http://3.138.221.70:8000` o `:8001`, el navegador bloqueará las peticiones por
-**contenido mixto** y verás errores de red/CORS aunque el backend esté bien.
-
-Para producción, expón el backend por HTTPS. Ejemplo con Caddy en la misma EC2:
-
-```caddyfile
-api-staging.tudominio.com {
-    reverse_proxy 127.0.0.1:8000
-}
-
-api.tudominio.com {
-    reverse_proxy 127.0.0.1:8001
-}
-```
-
-Luego cambia las variables en Vercel:
-
-```env
-# Preview
-API_BASE_URL=https://api-staging.tudominio.com
-
-# Production
-API_BASE_URL=https://api.tudominio.com
-```
-
-Y agrega los dominios de Vercel a `CORS_ORIGINS`. Un túnel (Cloudflare Tunnel,
-ngrok) sirve para una demo, pero no como solución permanente.
-
-## 6. Probar el build en local
+## 5. Probar el build en local
 
 ```powershell
 flutter --version
 flutter pub get
-flutter analyze
+flutter analyze --no-fatal-infos --no-fatal-warnings
 flutter test
 
-# Build de staging (PowerShell)
-flutter build web --release --dart-define=API_BASE_URL=http://3.138.221.70:8000
+# Web (producción/preview): sin variable, la app usa Uri.base.origin
+flutter build web --release
 
-# Build de producción
+# Override explícito (móvil/escritorio o pruebas directas)
 flutter build web --release --dart-define=API_BASE_URL=http://3.138.221.70:8001
 ```
 
-El resultado queda en `build\web`. Para revisar que la URL se inyectó:
+El resultado queda en `build\web`. Para confirmar que los endpoints usan ruta
+relativa (sin duplicar `/api`):
 
 ```powershell
-Select-String -Path build\web\main.dart.js -Pattern "3.138.221.70:8000"
+Select-String -Path build\web\main.dart.js -Pattern "/api/auth/login"
 ```
 
-Servir el build localmente (usa el puerto 5173 para coincidir con el CORS por
-defecto del backend):
-
-```powershell
-cd build\web
-python -m http.server 5173
-```
-
-Abre `http://localhost:5173`.
-
-También puedes probar el script tal como lo ejecuta Vercel (Git Bash o WSL):
+Para probar el proxy como en producción, usa Vercel Dev (aplica `vercel.json`
+localmente y reenvía `/api/*` a EC2):
 
 ```bash
-API_BASE_URL=http://3.138.221.70:8000 bash scripts/vercel-build.sh
+npx vercel dev
+# abre http://localhost:3000
 ```
 
-## 7. Verificar el despliegue
+> Servir `build/web` con `python -m http.server` **no** aplica el rewrite de
+> Vercel, así que `/api/*` devolverá 404. Para desarrollo web local usa
+> `vercel dev` o `flutter run -d chrome` con `--dart-define` + CORS.
+
+## 6. Verificar el despliegue
 
 1. **GitHub Actions**: en la pestaña Actions debe aparecer el workflow
    **Deploy a Vercel** en verde.
@@ -229,8 +191,6 @@ API_BASE_URL=http://3.138.221.70:8000 bash scripts/vercel-build.sh
    gh run list --workflow "Deploy a Vercel"
    gh run watch
    ```
-
-   El resumen del run muestra la URL publicada.
 
 2. **Vercel**: revisa el deployment en el dashboard o con la CLI:
 
@@ -242,18 +202,26 @@ API_BASE_URL=http://3.138.221.70:8000 bash scripts/vercel-build.sh
 3. **HTTP**: la raíz y una ruta interna deben responder `200` (rewrite de SPA):
 
    ```bash
-   curl -I https://TU-DOMINIO.vercel.app
-   curl -I https://TU-DOMINIO.vercel.app/login
+   curl -I https://parklink-app.vercel.app
+   curl -I https://parklink-app.vercel.app/login
    ```
 
-4. **Aplicación**: abre la URL, inicia sesión y revisa en DevTools → Network que
-   las peticiones van al host y puerto correctos (`8000` en Preview, `8001` en
-   Production) y que el preflight OPTIONS responde con el origen permitido.
+4. **Proxy de la API**: haz login a través del dominio de Vercel y confirma que
+   responde el back-end (revisa DevTools → Network):
+
+   ```bash
+   curl -i -X POST "https://parklink-app.vercel.app/api/auth/login" \
+     -H "Content-Type: application/json" \
+     -d '{"correo":"tu@correo.com","password":"TuClave"}'
+   ```
+
+   Debe devolver `200` con el JSON de `access_token`/`token`, igual que si
+   llamaras directo a `http://3.138.221.70:8001/api/auth/login`.
 
 5. **Logs**: en Vercel → Deployment → Logs, o `npx vercel logs <URL>`, no debe
    haber errores de build.
 
-## 8. Seguridad de credenciales
+## 7. Seguridad de credenciales
 
 - `VERCEL_TOKEN`, `VERCEL_ORG_ID` y `VERCEL_PROJECT_ID` viven únicamente en
   **GitHub Secrets**.
