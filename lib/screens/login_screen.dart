@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+
 import '../../app_theme.dart';
+import '../../services/auth_service.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({Key? key}) : super(key: key);
@@ -14,19 +16,44 @@ class _LoginScreenState extends State<LoginScreen> {
   final _passwordController = TextEditingController();
   bool _obscurePassword = true;
   bool _isLoading = false;
+  String? _errorMessage;
 
-  void _handleLogin() async {
-    if (_formKey.currentState!.validate()) {
-      setState(() => _isLoading = true);
+  Future<void> _handleLogin() async {
+    if (!_formKey.currentState!.validate()) {
+      return;
+    }
 
-      // Simulación de respuesta de autenticación
-      await Future.delayed(const Duration(seconds: 1));
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
 
-      setState(() => _isLoading = false);
+    final result = await AuthService.login(
+      _emailController.text.trim(),
+      _passwordController.text,
+    );
 
-      if (mounted) {
-        Navigator.pushReplacementNamed(context, '/user/dashboard');
-      }
+    if (!mounted) {
+      return;
+    }
+
+    setState(() => _isLoading = false);
+
+    if (result.ok) {
+      Navigator.pushReplacementNamed(context, _routeForRol(result.rol));
+    } else {
+      setState(() => _errorMessage = result.mensaje);
+    }
+  }
+
+  String _routeForRol(String? rol) {
+    switch (rol?.toLowerCase()) {
+      case 'administrador':
+        return '/admin/dashboard';
+      case 'vigilante':
+        return '/vigilante/dashboard';
+      default:
+        return '/user/dashboard';
     }
   }
 
@@ -166,6 +193,41 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                     ),
                     const SizedBox(height: 24),
+
+                    // Mensaje de error de autenticación
+                    if (_errorMessage != null) ...[
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 10,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppTheme.accent.withOpacity(0.08),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(
+                              Icons.error_outline,
+                              size: 18,
+                              color: AppTheme.accent,
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                _errorMessage!,
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  color: AppTheme.accent,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                    ],
 
                     // Botón de Iniciar Sesión
                     SizedBox(

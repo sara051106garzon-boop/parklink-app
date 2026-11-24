@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 // Importa tus pantallas usando rutas relativas exactas desde 'lib/main.dart'
 import 'screens/login_screen.dart';
+import 'screens/admin/admin_dashboard_screen.dart';
 import 'screens/user/user_profile_screen.dart';
 import 'screens/user/user_notifications_screen.dart';
 import 'screens/user/user_help_screen.dart';
@@ -40,6 +41,7 @@ class MyApp extends StatelessWidget {
       initialRoute: '/login',
       routes: {
         '/login': (context) => const LoginScreen(),
+        '/admin/dashboard': (context) => const AdminDashboardScreen(),
         '/user/dashboard': (context) => const UserDashboardScreen(),
         '/user/profile': (context) => const UserProfileScreen(),
         '/user/notifications': (context) => const UserNotificationsScreen(),

@@ -1,0 +1,18 @@
+# Archivos que no se suben al proyecto de Vercel.
+# El despliegue prebuilt solo publica .vercel/output; el build se genera desde
+# lib/ + web/ con scripts/vercel-build.sh.
+
+.env
+.env.*
+!.env.example
+.vercel/
+.dart_tool/
+build/
+android/
+ios/
+linux/
+macos/
+windows/
+test/
+.idea/
+*.iml

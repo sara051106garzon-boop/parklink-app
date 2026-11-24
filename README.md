@@ -35,6 +35,8 @@ módulos: cada rol tiene su propio conjunto de pantallas.
 lib/
 ├── main.dart                 Punto de entrada
 ├── app_theme.dart            Tema y estilos globales
+├── config/
+│   └── api_config.dart       URL base de la API (API_BASE_URL)
 ├── screens/
 │   ├── login_screen.dart
 │   ├── admin/                Panel administrativo (11 pantallas)
@@ -60,8 +62,44 @@ flutter run -d chrome
 flutter run -d windows
 ```
 
-Para apuntar a otra URL del back-end, ajusta la constante de la API en
-`lib/services/auth_service.dart`.
+## Configuración del back-end (`API_BASE_URL`)
+
+La URL base de la API se lee en tiempo de compilación desde la variable
+`API_BASE_URL` (ver `lib/config/api_config.dart`). No hay URLs hardcodeadas en
+los servicios:
+
+```bash
+# Desarrollo local (valor por defecto si no se define la variable)
+flutter run --dart-define=API_BASE_URL=http://127.0.0.1:5000
+
+# Emulador Android
+flutter run --dart-define=API_BASE_URL=http://10.0.2.2:5000
+
+# Back-end de staging en EC2
+flutter build web --release --dart-define=API_BASE_URL=http://3.138.221.70:8000
+
+# Back-end de producción en EC2
+flutter build web --release --dart-define=API_BASE_URL=http://3.138.221.70:8001
+```
+
+Sin `--dart-define`, la app usa `http://127.0.0.1:5000` (web/escritorio) o
+`http://10.0.2.2:5000` (emulador Android). `.env.example` documenta los valores;
+Flutter **no** carga archivos `.env` automáticamente.
+
+> El frontend en Vercel se sirve por HTTPS. Un back-end `http://` provoca
+> bloqueo por contenido mixto en el navegador. Lee la sección de HTTPS en
+> [`DEPLOY.md`](DEPLOY.md) antes de publicar.
+
+## Despliegue en Vercel
+
+El repositorio ya incluye:
+
+- `vercel.json` — build de Flutter Web, rewrites para SPA y cabeceras.
+- `scripts/vercel-build.sh` — instala Flutter (si hace falta) y compila `build/web`.
+- `.github/workflows/deploy-vercel.yml` — CI/CD con GitHub Actions y Vercel CLI.
+
+Los pasos completos (variables por entorno, GitHub Secrets, CORS en EC2 y
+verificación) están en [`DEPLOY.md`](DEPLOY.md).
 
 ## Pruebas
 

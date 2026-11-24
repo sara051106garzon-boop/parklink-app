@@ -1,0 +1,129 @@
+# ---------------------------------------------------------------------------
+# Despliegue automático a Vercel: build de Flutter Web + Vercel CLI.
+#
+# Requiere estos GitHub Secrets (nunca los escribas en el repositorio):
+#   VERCEL_TOKEN      -> https://vercel.com/account/tokens
+#   VERCEL_ORG_ID     -> .vercel/project.json después de `vercel link`
+#   VERCEL_PROJECT_ID -> .vercel/project.json después de `vercel link`
+#
+# API_BASE_URL NO va en GitHub: se configura en Vercel por entorno.
+#   Preview    -> http://3.138.221.70:8000
+#   Production -> http://3.138.221.70:8001
+# ---------------------------------------------------------------------------
+name: Deploy a Vercel
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Entorno de Vercel a desplegar
+        required: true
+        default: preview
+        type: choice
+        options:
+          - preview
+          - production
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: vercel-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Flutter Web + Vercel
+    runs-on: ubuntu-latest
+    # Los PR desde forks no reciben secretos. Los PR internos sí generan Preview.
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      TARGET: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.target || (github.event_name == 'push' && 'production' || 'preview') }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Instalar Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: "3.50.1"
+          cache: true
+
+      - name: Verificar Flutter
+        run: flutter --version
+
+      - name: Dependencias
+        run: flutter pub get
+
+      - name: Pruebas
+        run: flutter test
+
+      - name: Instalar Vercel CLI
+        run: npm install --global vercel@latest
+
+      - name: Descargar configuración y variables del proyecto
+        run: |
+          if [ "$TARGET" = "production" ]; then
+            vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+          else
+            vercel pull --yes --environment=preview --token="$VERCEL_TOKEN"
+          fi
+
+      - name: Validar API_BASE_URL
+        run: |
+          ENV_FILE=".vercel/.env.${TARGET}.local"
+          if [ -f "$ENV_FILE" ]; then
+            # Carga las variables del entorno (API_BASE_URL, etc.) para el build.
+            set -a
+            # shellcheck disable=SC1090
+            . "$ENV_FILE"
+            set +a
+          fi
+
+          if [ -z "${API_BASE_URL:-}" ]; then
+            echo "::error::Define API_BASE_URL en Vercel (Settings > Environment Variables) para el entorno ${TARGET}."
+            exit 1
+          fi
+
+          echo "Desplegando a ${TARGET} con API_BASE_URL=${API_BASE_URL}"
+          echo "API_BASE_URL=${API_BASE_URL}" >> "$GITHUB_ENV"
+
+      - name: Build con Vercel
+        run: |
+          if [ "$TARGET" = "production" ]; then
+            vercel build --prod --yes --token="$VERCEL_TOKEN"
+          else
+            vercel build --yes --token="$VERCEL_TOKEN"
+          fi
+
+      - name: Deploy a Vercel
+        id: deploy
+        run: |
+          if [ "$TARGET" = "production" ]; then
+            URL="$(vercel deploy --prebuilt --prod --yes --token="$VERCEL_TOKEN" | grep -Eo 'https://[A-Za-z0-9._-]+\.vercel\.app[^ ]*' | tail -n 1)"
+          else
+            URL="$(vercel deploy --prebuilt --yes --token="$VERCEL_TOKEN" | grep -Eo 'https://[A-Za-z0-9._-]+\.vercel\.app[^ ]*' | tail -n 1)"
+          fi
+          if [ -z "$URL" ]; then
+            echo "::error::Vercel no devolvió una URL de despliegue."
+            exit 1
+          fi
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "### Vercel ${TARGET}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Desplegado en: ${URL}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Resumen del despliegue
+        run: echo "Despliegue ${TARGET} listo en ${{ steps.deploy.outputs.url }}"

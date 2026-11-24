@@ -43,3 +43,13 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# ── Entorno y credenciales de despliegue ─────────────────────────────────────
+# Nunca versionar archivos .env reales ni tokens.
+.env
+.env.*
+!.env.example
+dart_defines.json
+.vercel/
+*.pem
+*.key
