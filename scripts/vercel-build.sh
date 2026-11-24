@@ -6,7 +6,7 @@
 #   API_BASE_URL=http://3.138.221.70:8000 bash scripts/vercel-build.sh
 #
 # En Vercel, API_BASE_URL se toma de las Environment Variables del proyecto
-# (Preview = staging, Production = producción). Si no está definida en un
+# (Preview = staging, Production = producciÃ³n). Si no estÃ¡ definida en un
 # build de Vercel, el script falla para evitar publicar una app apuntando a
 # localhost.
 # ---------------------------------------------------------------------------
@@ -17,8 +17,8 @@ FLUTTER_HOME="${FLUTTER_HOME:-$HOME/flutter}"
 
 if [ -z "${API_BASE_URL:-}" ]; then
   if [ "${VERCEL:-0}" = "1" ]; then
-    echo "ERROR: API_BASE_URL no está configurada en Vercel." >&2
-    echo "Configúrala en Settings > Environment Variables para Preview y Production." >&2
+    echo "ERROR: API_BASE_URL no estÃ¡ configurada en Vercel." >&2
+    echo "ConfigÃºrala en Settings > Environment Variables para Preview y Production." >&2
     exit 1
   fi
   API_BASE_URL="http://127.0.0.1:5000"
@@ -29,6 +29,7 @@ while [ "${API_BASE_URL%/}" != "$API_BASE_URL" ]; do
   API_BASE_URL="${API_BASE_URL%/}"
 done
 
+API_BASE_URL="$(printf '%s' "$API_BASE_URL" | tr -d '\r\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//")"
 case "$API_BASE_URL" in
   http://*|https://*) ;;
   *)
@@ -39,13 +40,13 @@ esac
 
 if [ "${API_BASE_URL#http://}" != "$API_BASE_URL" ] && [ "${VERCEL:-0}" = "1" ]; then
   echo "ADVERTENCIA: el frontend se sirve por HTTPS y API_BASE_URL usa HTTP." >&2
-  echo "Los navegadores bloquearán las llamadas por contenido mixto. Usa HTTPS en el back-end." >&2
+  echo "Los navegadores bloquearÃ¡n las llamadas por contenido mixto. Usa HTTPS en el back-end." >&2
 fi
 
 export PATH="$FLUTTER_HOME/bin:$PATH"
 
 if ! command -v flutter >/dev/null 2>&1; then
-  echo "Flutter no está instalado. Descargando Flutter $FLUTTER_VERSION en $FLUTTER_HOME..."
+  echo "Flutter no estÃ¡ instalado. Descargando Flutter $FLUTTER_VERSION en $FLUTTER_HOME..."
   rm -rf "$FLUTTER_HOME"
   git clone --depth 1 --branch "$FLUTTER_VERSION" \
     https://github.com/flutter/flutter.git "$FLUTTER_HOME"
